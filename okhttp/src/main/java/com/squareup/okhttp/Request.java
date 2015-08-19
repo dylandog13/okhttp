@@ -143,13 +143,33 @@ public final class Request {
       return this;
     }
 
+    /**
+     * Sets the URL target of this request.
+     *
+     * @throws IllegalArgumentException if {@code url} is not a valid HTTP or HTTPS URL. Avoid this
+     *     exception by calling {@link HttpUrl#parse}; it returns null for invalid URLs.
+     */
     public Builder url(String url) {
       if (url == null) throw new IllegalArgumentException("url == null");
+
+      // Silently replace websocket URLs with HTTP URLs.
+      if (url.regionMatches(true, 0, "ws:", 0, 3)) {
+        url = "http:" + url.substring(3);
+      } else if (url.regionMatches(true, 0, "wss:", 0, 4)) {
+        url = "https:" + url.substring(4);
+      }
+
       HttpUrl parsed = HttpUrl.parse(url);
       if (parsed == null) throw new IllegalArgumentException("unexpected url: " + url);
       return url(parsed);
     }
 
+    /**
+     * Sets the URL target of this request.
+     *
+     * @throws IllegalArgumentException if the scheme of {@code url} is not {@code http} or {@code
+     *     https}.
+     */
     public Builder url(URL url) {
       if (url == null) throw new IllegalArgumentException("url == null");
       HttpUrl parsed = HttpUrl.get(url);

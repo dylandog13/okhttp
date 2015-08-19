@@ -1,6 +1,6 @@
 package com.squareup.okhttp;
 
-import com.squareup.okhttp.internal.spdy.Header;
+import com.squareup.okhttp.internal.framed.Header;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -26,5 +26,11 @@ public final class TestUtil {
 
   public static <T> Set<T> setOf(Collection<T> elements) {
     return new LinkedHashSet<>(elements);
+  }
+
+  public static String repeat(char c, int count) {
+    char[] array = new char[count];
+    Arrays.fill(array, c);
+    return new String(array);
   }
 }

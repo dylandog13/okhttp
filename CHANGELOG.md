@@ -1,6 +1,97 @@
 Change Log
 ==========
 
+## Version 2.4.0
+
+_2015-05-22_
+
+ *  **Forbid response bodies on HTTP 204 and 205 responses.** Webservers that
+    return such malformed responses will now trigger a `ProtocolException` in
+    the client.
+
+ *  **WebSocketListener has incompatible changes.** The `onOpen()` method is now
+    called on the reader thread, so implementations must return before further
+    websocket messages will be delivered. The `onFailure()` method now includes
+    an HTTP response if one was returned.
+
+## Version 2.4.0-RC1
+
+_2015-05-16_
+
+ *  **New HttpUrl API.** It's like `java.net.URL` but good. Note that
+    `Request.Builder.url()` now throws `IllegalArgumentException` on malformed
+    URLs. (Previous releases would throw a `MalformedURLException` when calling
+    a malformed URL.)
+
+ *  **We've improved connect failure recovery.** We now differentiate between
+    setup, connecting, and connected and implement appropriate recovery rules
+    for each. This changes `Address` to no longer use `ConnectionSpec`. (This is
+    an incompatible API change).
+
+ *  **`FormEncodingBuilder` now uses `%20` instead of `+` for encoded spaces.**
+    Both are permitted-by-spec, but `%20` requires fewer special cases.
+
+ *  **Okio has been updated to 1.4.0.**
+     ```
+     <dependency>
+       <groupId>com.squareup.okio</groupId>
+       <artifactId>okio</artifactId>
+       <version>1.4.0</version>
+     </dependency>
+     ```
+
+ *  **`Request.Builder` no longer accepts null if a request body is required.**
+    Passing null will now fail for request methods that require a body. Instead
+    use an empty body such as this one:
+
+    ```
+        RequestBody.create(null, new byte[0]);
+    ```
+
+ * **`CertificatePinner` now supports wildcard hostnames.** As always with
+   certificate pinning, you must be very careful to avoid [bricking][brick]
+   your app. You'll need to pin both the top-level domain and the `*.` domain
+   for full coverage.
+
+    ```
+     client.setCertificatePinner(new CertificatePinner.Builder()
+         .add("publicobject.com",   "sha1/DmxUShsZuNiqPQsX2Oi9uv2sCnw=")
+         .add("*.publicobject.com", "sha1/DmxUShsZuNiqPQsX2Oi9uv2sCnw=")
+         .add("publicobject.com",   "sha1/SXxoaOSEzPC6BgGmxAt/EAcsajw=")
+         .add("*.publicobject.com", "sha1/SXxoaOSEzPC6BgGmxAt/EAcsajw=")
+         .add("publicobject.com",   "sha1/blhOM3W9V/bVQhsWAcLYwPU6n24=")
+         .add("*.publicobject.com", "sha1/blhOM3W9V/bVQhsWAcLYwPU6n24=")
+         .add("publicobject.com",   "sha1/T5x9IXmcrQ7YuQxXnxoCmeeQ84c=")
+         .add("*.publicobject.com", "sha1/T5x9IXmcrQ7YuQxXnxoCmeeQ84c=")
+         .build());
+    ```
+
+ *  **Interceptors lists are now deep-copied by `OkHttpClient.clone()`.**
+    Previously clones shared interceptors, which made it difficult to customize
+    the interceptors on a request-by-request basis.
+
+ *  New: `Headers.toMultimap()`.
+ *  New: `RequestBody.create(MediaType, ByteString)`.
+ *  New: `ConnectionSpec.isCompatible(SSLSocket)`.
+ *  New: `Dispatcher.getQueuedCallCount()` and
+    `Dispatcher.getRunningCallCount()`. These can be useful in diagnostics.
+ *  Fix: OkHttp no longer shares timeouts between pooled connections. This was
+    causing some applications to crash when connections were reused.
+ *  Fix: `OkApacheClient` now allows an empty `PUT` and `POST`.
+ *  Fix: Websockets no longer rebuffer socket streams.
+ *  Fix: Websockets are now better at handling close frames.
+ *  Fix: Content type matching is now case insensitive.
+ *  Fix: `Vary` headers are not lost with `android.net.http.HttpResponseCache`.
+ *  Fix: HTTP/2 wasn't enforcing stream timeouts when writing the underlying
+    connection. Now it is.
+ *  Fix: Never return null on `call.proceed()`. This was a bug in call
+    cancelation.
+ *  Fix: When a network interceptor mutates a request, that change is now
+    reflected in `Response.networkResponse()`.
+ *  Fix: Badly-behaving caches now throw a checked exception instead of a
+    `NullPointerException`.
+ *  Fix: Better handling of uncaught exceptions in MockWebServer with HTTP/2.
+
 ## Version 2.3.0
 
 _2015-03-16_
@@ -66,7 +157,7 @@ _2014-12-30_
     This is a source-incompatible change. If you have code that calls
     `RequestBody.contentLength()`, your compile will break with this
     update. The change is binary-compatible, however: code compiled
-    for OkHttp 2.0 and 2.1 will continue work with this update.
+    for OkHttp 2.0 and 2.1 will continue to work with this update.
 
  *  **`COMPATIBLE_TLS` no longer supports SSLv3.** In response to the
     [POODLE](http://googleonlinesecurity.blogspot.ca/2014/10/this-poodle-bites-exploiting-ssl-30.html)
@@ -326,7 +417,7 @@ in addition to synchronous blocking calls.
  *  **TunnelRequest is gone.** It specified how to connect to an HTTP proxy.
     OkHttp 2 uses the new `Request` class for this.
 
- *  **Dispatcher** is a new class to manages the queue of asynchronous calls. It
+ *  **Dispatcher** is a new class that manages the queue of asynchronous calls. It
     implements limits on total in-flight calls and in-flight calls per host.
 
 #### Implementation changes
@@ -543,3 +634,4 @@ _2013-05-06_
 
 Initial release.
 
+ [brick]: (https://noncombatant.org/2015/05/01/about-http-public-key-pinning/)

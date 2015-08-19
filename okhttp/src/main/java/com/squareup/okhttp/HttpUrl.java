@@ -182,7 +182,7 @@ import okio.Buffer;
  * Java includes both {@link URL java.net.URL} and {@link URI java.net.URI}. We offer a new URL
  * model to address problems that the others don't.
  *
- * <h3>Different URLs should be different</h3>
+ * <h4>Different URLs should be different</h4>
  * Although they have different content, {@code java.net.URL} considers the following two URLs
  * equal, and the {@link Object#equals equals()} method between them returns true:
  * <ul>
@@ -195,7 +195,7 @@ import okio.Buffer;
  * require a DNS lookup, and incorrect because unequal URLs may be equal because of how they are
  * hosted.
  *
- * <h3>Equal URLs should be equal</h3>
+ * <h4>Equal URLs should be equal</h4>
  * These two URLs are semantically identical, but {@code java.net.URI} disagrees:
  * <ul>
  *   <li>http://host:80/
@@ -225,21 +225,21 @@ import okio.Buffer;
  *    /etc/passwd
  * }</pre>
  *
- * <h3>If it works on the web, it should work in your application</h3>
+ * <h4>If it works on the web, it should work in your application</h4>
  * The {@code java.net.URI} class is strict around what URLs it accepts. It rejects URLs like
  * "http://example.com/abc|def" because the '|' character is unsupported. This class is more
  * forgiving: it will automatically percent-encode the '|', yielding "http://example.com/abc%7Cdef".
  * This kind behavior is consistent with web browsers. {@code HttpUrl} prefers consistency with
  * major web browsers over consistency with obsolete specifications.
  *
- * <h3>Paths and Queries should decompose</h3>
+ * <h4>Paths and Queries should decompose</h4>
  * Neither of the built-in URL models offer direct access to path segments or query parameters.
  * Manually using {@code StringBuilder} to assemble these components is cumbersome: do '+'
  * characters get silently replaced with spaces? If a query parameter contains a '&amp;', does that
  * get escaped? By offering methods to read and write individual query parameters directly,
  * application developers are saved from the hassles of encoding and decoding.
  *
- * <h3>Plus a modern API</h3>
+ * <h4>Plus a modern API</h4>
  * The URL (JDK1.0) and URI (Java 1.4) classes predate builders and instead use telescoping
  * constructors. For example, there's no API to compose a URI with a custom port without also
  * providing a query and fragment.
@@ -255,12 +255,13 @@ import okio.Buffer;
 public final class HttpUrl {
   private static final char[] HEX_DIGITS =
       { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
-  private static final String USERNAME_ENCODE_SET = " \"':;<=>@[]^`{}|/\\?#";
-  private static final String PASSWORD_ENCODE_SET = " \"':;<=>@[]\\^`{}|/\\?#";
-  private static final String PATH_SEGMENT_ENCODE_SET = " \"<>^`{}|/\\?#";
-  private static final String QUERY_ENCODE_SET = " \"'<>#";
-  private static final String QUERY_COMPONENT_ENCODE_SET = " \"'<>#&=";
-  private static final String FRAGMENT_ENCODE_SET = "";
+  static final String USERNAME_ENCODE_SET = " \"':;<=>@[]^`{}|/\\?#";
+  static final String PASSWORD_ENCODE_SET = " \"':;<=>@[]^`{}|/\\?#";
+  static final String PATH_SEGMENT_ENCODE_SET = " \"<>^`{}|/\\?#";
+  static final String QUERY_ENCODE_SET = " \"'<>#";
+  static final String QUERY_COMPONENT_ENCODE_SET = " \"'<>#&=";
+  static final String FORM_ENCODE_SET = " \"':;<=>@[]^`{}|/\\?#&!$(),~";
+  static final String FRAGMENT_ENCODE_SET = "";
 
   /** Either "http" or "https". */
   private final String scheme;
@@ -569,7 +570,12 @@ public final class HttpUrl {
     result.encodedUsername = encodedUsername();
     result.encodedPassword = encodedPassword();
     result.host = host;
-    result.port = port;
+    // If we're set to a default port, unset it, in case of a scheme change.
+    if (port == defaultPort(scheme)) {
+      result.port = -1;
+    } else {
+      result.port = port;
+    }
     result.encodedPathSegments.clear();
     result.encodedPathSegments.addAll(encodedPathSegments());
     result.encodedQuery(encodedQuery());
@@ -1188,7 +1194,10 @@ public final class HttpUrl {
       // If the input is encased in square braces "[...]", drop 'em. We have an IPv6 address.
       if (percentDecoded.startsWith("[") && percentDecoded.endsWith("]")) {
         InetAddress inetAddress = decodeIpv6(percentDecoded, 1, percentDecoded.length() - 1);
-        return inetAddress != null ? inetAddress.getHostAddress() : null;
+        if (inetAddress == null) return null;
+        byte[] address = inetAddress.getAddress();
+        if (address.length == 16) return inet6AddressToAscii(address);
+        throw new AssertionError();
       }
 
       // Do IDN decoding. This converts {@code ☃.net} to {@code xn--n3h.net}.
@@ -1321,6 +1330,39 @@ public final class HttpUrl {
       }
     }
 
+    private static String inet6AddressToAscii(byte[] address) {
+      // Go through the address looking for the longest run of 0s. Each group is 2-bytes.
+      int longestRunOffset = -1;
+      int longestRunLength = 0;
+      for (int i = 0; i < address.length; i += 2) {
+        int currentRunOffset = i;
+        while (i < 16 && address[i] == 0 && address[i + 1] == 0) {
+          i += 2;
+        }
+        int currentRunLength = i - currentRunOffset;
+        if (currentRunLength > longestRunLength) {
+          longestRunOffset = currentRunOffset;
+          longestRunLength = currentRunLength;
+        }
+      }
+
+      // Emit each 2-byte group in hex, separated by ':'. The longest run of zeroes is "::".
+      Buffer result = new Buffer();
+      for (int i = 0; i < address.length; ) {
+        if (i == longestRunOffset) {
+          result.writeByte(':');
+          i += longestRunLength;
+          if (i == 16) result.writeByte(':');
+        } else {
+          if (i > 0) result.writeByte(':');
+          int group = (address[i] & 0xff) << 8 | address[i + 1] & 0xff;
+          result.writeHexadecimalUnsignedLong(group);
+          i += 2;
+        }
+      }
+      return result.readUtf8();
+    }
+
     private static int parsePort(String input, int pos, int limit) {
       try {
         // Canonicalize the port string to skip '\n' etc.
@@ -1422,10 +1464,10 @@ public final class HttpUrl {
           || (codePoint == '%' && !alreadyEncoded)
           || (query && codePoint == '+')) {
         // Slow path: the character at i requires encoding!
-        StringBuilder out = new StringBuilder();
-        out.append(input, pos, i);
+        Buffer out = new Buffer();
+        out.writeUtf8(input, pos, i);
         canonicalize(out, input, i, limit, encodeSet, alreadyEncoded, query);
-        return out.toString();
+        return out.readUtf8();
       }
     }
 
@@ -1433,7 +1475,7 @@ public final class HttpUrl {
     return input.substring(pos, limit);
   }
 
-  static void canonicalize(StringBuilder out, String input, int pos, int limit,
+  static void canonicalize(Buffer out, String input, int pos, int limit,
       String encodeSet, boolean alreadyEncoded, boolean query) {
     Buffer utf8Buffer = null; // Lazily allocated.
     int codePoint;
@@ -1444,7 +1486,7 @@ public final class HttpUrl {
         // Skip this character.
       } else if (query && codePoint == '+') {
         // HTML permits space to be encoded as '+'. We use '%20' to avoid special cases.
-        out.append(alreadyEncoded ? "%20" : "%2B");
+        out.writeUtf8(alreadyEncoded ? "%20" : "%2B");
       } else if (codePoint < 0x20
           || codePoint >= 0x7f
           || encodeSet.indexOf(codePoint) != -1
@@ -1456,13 +1498,13 @@ public final class HttpUrl {
         utf8Buffer.writeUtf8CodePoint(codePoint);
         while (!utf8Buffer.exhausted()) {
           int b = utf8Buffer.readByte() & 0xff;
-          out.append('%');
-          out.append(HEX_DIGITS[(b >> 4) & 0xf]);
-          out.append(HEX_DIGITS[b & 0xf]);
+          out.writeByte('%');
+          out.writeByte(HEX_DIGITS[(b >> 4) & 0xf]);
+          out.writeByte(HEX_DIGITS[b & 0xf]);
         }
       } else {
         // This character doesn't need encoding. Just copy it over.
-        out.append((char) codePoint);
+        out.writeUtf8CodePoint(codePoint);
       }
     }
   }
